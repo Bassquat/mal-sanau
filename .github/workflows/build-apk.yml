@@ -25,6 +25,8 @@ jobs:
       - run: rm -f test/widget_test.dart
       - run: flutter pub get
       # Some plugins pin an old compileSdk; raise it so the build links.
+      # AGP 9 new DSL breaks older plugins (video_thumbnail); opt out.
+      - run: echo 'android.newDsl=false' >> android/gradle.properties
       - name: Raise plugin compileSdk and app minSdk
         run: |
           find "$PUB_CACHE/hosted" -path '*/android/build.gradle' -print0 | xargs -0 -r sed -i -E 's/compileSdk(Version)?[ =]+[0-9]+/compileSdk 36/'
