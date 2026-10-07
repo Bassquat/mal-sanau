@@ -1,7 +1,7 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 
 import 'history_store.dart';
@@ -104,15 +104,14 @@ class _CountPageState extends State<CountPage> {
   }
 
   Future<void> _pick() async {
-    final res = await FilePicker.platform.pickFiles(type: FileType.video);
-    final path = res?.files.single.path;
-    if (path == null) return;
+    final picked = await ImagePicker().pickVideo(source: ImageSource.gallery);
+    if (picked == null) return;
     await _video?.dispose();
-    final c = VideoPlayerController.file(File(path));
+    final c = VideoPlayerController.file(File(picked.path));
     await c.initialize();
     setState(() {
       _video = c;
-      _name = res!.files.single.name;
+      _name = picked.name;
       _in = 0;
       _out = 0;
     });
