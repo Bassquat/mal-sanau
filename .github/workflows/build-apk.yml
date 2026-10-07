@@ -21,6 +21,8 @@ jobs:
       # The repo keeps only lib/ and config; generate the Android scaffold here.
       - name: Generate Android project
         run: flutter create . --platforms=android --project-name mal_sanau --org kz.malsanau
+      # flutter create adds a template widget test that does not match this app.
+      - run: rm -f test/widget_test.dart
       - run: flutter pub get
       - run: flutter test
       - run: flutter build apk --release
