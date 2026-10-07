@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 
+import 'analyzer.dart';
 import 'history_store.dart';
 
 void main() => runApp(const MalSanauApp());
@@ -96,6 +97,11 @@ class _CountPageState extends State<CountPage> {
   String _name = '';
   int _in = 0;
   int _out = 0;
+  String _path = '';
+  double _line = 0.5;
+  bool _invert = false;
+  double? _progress;
+  String? _error;
 
   @override
   void dispose() {
@@ -112,9 +118,45 @@ class _CountPageState extends State<CountPage> {
     setState(() {
       _video = c;
       _name = picked.name;
+      _path = picked.path;
+      _error = null;
       _in = 0;
       _out = 0;
     });
+  }
+
+  Future<void> _auto() async {
+    final v = _video;
+    if (v == null) return;
+    await v.pause();
+    setState(() {
+      _progress = 0;
+      _error = null;
+    });
+    VideoAnalyzer? analyzer;
+    try {
+      analyzer = await VideoAnalyzer.load();
+      final r = await analyzer.analyze(
+        _path,
+        durationMs: v.value.duration.inMilliseconds,
+        lineFraction: _line,
+        invert: _invert,
+        onProgress: (p) {
+          if (mounted) setState(() => _progress = p);
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _in = r.nIn;
+          _out = r.nOut;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Қате: $e');
+    } finally {
+      analyzer?.close();
+      if (mounted) setState(() => _progress = null);
+    }
   }
 
   Future<void> _save() async {
@@ -132,7 +174,7 @@ class _CountPageState extends State<CountPage> {
     final v = _video;
     return Scaffold(
       appBar: AppBar(title: const Text('Жаңа санау')),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
@@ -145,8 +187,49 @@ class _CountPageState extends State<CountPage> {
             else ...[
               AspectRatio(
                 aspectRatio: v.value.aspectRatio,
-                child: VideoPlayer(v),
+                child: LayoutBuilder(
+                  builder: (context, c) => Stack(
+                    children: [
+                      Positioned.fill(child: VideoPlayer(v)),
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: c.maxHeight * _line,
+                        child: Container(height: 2, color: Colors.redAccent),
+                      ),
+                    ],
+                  ),
+                ),
               ),
+              Row(
+                children: [
+                  const Text('Қақпа сызығы'),
+                  Expanded(
+                    child: Slider(
+                      value: _line,
+                      min: 0.1,
+                      max: 0.9,
+                      onChanged: (x) => setState(() => _line = x),
+                    ),
+                  ),
+                ],
+              ),
+              SwitchListTile(
+                dense: true,
+                title: const Text('Бағытты ауыстыру (төмен = шықты)'),
+                value: _invert,
+                onChanged: (x) => setState(() => _invert = x),
+              ),
+              if (_progress != null)
+                LinearProgressIndicator(value: _progress)
+              else
+                OutlinedButton.icon(
+                  onPressed: _auto,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('Автоматты санау'),
+                ),
+              if (_error != null)
+                Text(_error!, style: const TextStyle(color: Colors.red)),
               IconButton(
                 iconSize: 40,
                 icon: Icon(
@@ -155,7 +238,7 @@ class _CountPageState extends State<CountPage> {
                     v.value.isPlaying ? v.pause() : v.play()),
               ),
             ],
-            const Spacer(),
+            const SizedBox(height: 8),
             Text('Баланс: ${_in - _out}',
                 style: Theme.of(context).textTheme.headlineMedium),
             const SizedBox(height: 8),
@@ -182,7 +265,7 @@ class _CountPageState extends State<CountPage> {
               ],
             ),
             const SizedBox(height: 12),
-            const Text('Автоматты санау келесі нұсқада қосылады.',
+            const Text('Автоматты нәтижені қолмен түзетуге болады.',
                 style: TextStyle(color: Colors.grey)),
             const SizedBox(height: 12),
             SizedBox(

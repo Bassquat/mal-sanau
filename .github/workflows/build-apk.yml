@@ -24,6 +24,13 @@ jobs:
       # flutter create adds a template widget test that does not match this app.
       - run: rm -f test/widget_test.dart
       - run: flutter pub get
+      # Some plugins pin an old compileSdk; raise it so the build links.
+      - name: Raise plugin compileSdk and app minSdk
+        run: |
+          find "$PUB_CACHE/hosted" -path '*/android/build.gradle' -print0 | xargs -0 -r sed -i -E 's/compileSdk(Version)?[ =]+[0-9]+/compileSdk 36/'
+          find "$PUB_CACHE/hosted" -path '*/android/build.gradle.kts' -print0 | xargs -0 -r sed -i -E 's/compileSdk(Version)?[ =]+[0-9]+/compileSdk = 36/'
+          sed -i -E 's/minSdk(Version)?( =)? *flutter\.minSdkVersion/minSdk = 26/' android/app/build.gradle.kts || true
+          sed -i -E 's/minSdkVersion flutter\.minSdkVersion/minSdkVersion 26/' android/app/build.gradle || true
       - run: flutter test
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
