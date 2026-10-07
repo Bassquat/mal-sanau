@@ -31,6 +31,7 @@ jobs:
         run: |
           find "$PUB_CACHE/hosted" -path '*/android/build.gradle' -print0 | xargs -0 -r sed -i -E 's/compileSdk(Version)?[ =]+[0-9]+/compileSdk 36/'
           find "$PUB_CACHE/hosted" -path '*/android/build.gradle.kts' -print0 | xargs -0 -r sed -i -E 's/compileSdk(Version)?[ =]+[0-9]+/compileSdk = 36/'
+          find "$PUB_CACHE/hosted" -path '*/android/build.gradle' -print0 | xargs -0 -r sed -i 's/jcenter()/mavenCentral()/g'
           sed -i -E 's/minSdk(Version)?( =)? *flutter\.minSdkVersion/minSdk = 26/' android/app/build.gradle.kts || true
           sed -i -E 's/minSdkVersion flutter\.minSdkVersion/minSdkVersion 26/' android/app/build.gradle || true
       - run: flutter test
