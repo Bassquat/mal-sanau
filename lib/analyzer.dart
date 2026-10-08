@@ -1,5 +1,7 @@
+import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
@@ -17,21 +19,19 @@ class AnalysisResult {
 /// EfficientDet-Lite0, track them and count crossings of a gate line drawn at
 /// any angle (see [GateLine]); crossing towards the arrow side = "in".
 class VideoAnalyzer {
-  VideoAnalyzer._(this._interpreter, this._scoresIdx, this._boxesIdx);
+  VideoAnalyzer._(this._model);
 
-  final Interpreter _interpreter;
-  final int _scoresIdx, _boxesIdx;
-  final Float32List _anchors = buildAnchors();
+  final Uint8List _model;
 
   static Future<VideoAnalyzer> load() async {
-    final it = await Interpreter.fromAsset(
-        'assets/models/efficientdet_lite0.tflite');
-    final firstIsScores = it.getOutputTensor(0).shape.last == numClasses;
-    return VideoAnalyzer._(it, firstIsScores ? 0 : 1, firstIsScores ? 1 : 0);
+    final data = await rootBundle.load('assets/models/efficientdet_lite0.tflite');
+    return VideoAnalyzer._(data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
   }
 
-  void close() => _interpreter.close();
+  void close() {}
 
+  /// Frames are pulled here (native work, async) and decoded, detected and
+  /// counted in a background isolate, so the UI thread stays free.
   Future<AnalysisResult> analyze(
     String videoPath, {
     required int durationMs,
@@ -39,84 +39,163 @@ class VideoAnalyzer {
     int fps = 4,
     void Function(double progress)? onProgress,
   }) async {
-    final tracker = CentroidTracker();
-    GateCounter? gate;
-    var frames = 0;
-    final step = 1000 ~/ fps;
-    for (var t = 0; t < durationMs; t += step) {
-      onProgress?.call(t / durationMs);
-      final bytes = await VideoThumbnail.thumbnailData(
-        video: videoPath,
-        imageFormat: ImageFormat.JPEG,
-        maxWidth: 640,
-        timeMs: t,
-        quality: 85,
-      );
-      if (bytes == null) continue;
-      final image = img.decodeJpg(bytes);
-      if (image == null) continue;
-      frames++;
-
-      final w = image.width.toDouble(), h = image.height.toDouble();
-      gate ??= _makeGate(w, h, line);
-      final dets = nms(_detect(image));
-      gate.update(tracker.update(dets));
+    final rp = ReceivePort();
+    final events = StreamIterator<dynamic>(rp);
+    final isolate = await Isolate.spawn(_worker, _Init(rp.sendPort, _model, line));
+    try {
+      await events.moveNext();
+      final worker = events.current as SendPort;
+      var frames = 0;
+      final step = 1000 ~/ fps;
+      for (var t = 0; t < durationMs; t += step) {
+        onProgress?.call(t / durationMs);
+        final bytes = await VideoThumbnail.thumbnailData(
+          video: videoPath,
+          imageFormat: ImageFormat.JPEG,
+          maxWidth: inputSize,
+          maxHeight: inputSize,
+          timeMs: t,
+          quality: 80,
+        );
+        if (bytes == null) continue;
+        worker.send(TransferableTypedData.fromList([bytes]));
+        await events.moveNext();
+        final r = events.current;
+        if (r is String) throw Exception(r);
+        frames++;
+      }
+      worker.send(null);
+      await events.moveNext();
+      final r = events.current;
+      if (r is String) throw Exception(r);
+      onProgress?.call(1);
+      final counts = (r as List).cast<int>();
+      return AnalysisResult(counts[0], counts[1], frames);
+    } finally {
+      isolate.kill(priority: Isolate.immediate);
+      await events.cancel();
+      rp.close();
     }
-    onProgress?.call(1);
-    return AnalysisResult(gate?.nIn ?? 0, gate?.nOut ?? 0, frames);
+  }
+}
+
+class _Init {
+  _Init(this.reply, this.model, GateLine line)
+      : p1x = line.ordered.$1.dx,
+        p1y = line.ordered.$1.dy,
+        p2x = line.ordered.$2.dx,
+        p2y = line.ordered.$2.dy;
+  final SendPort reply;
+  final Uint8List model;
+  final double p1x, p1y, p2x, p2y;
+}
+
+void _worker(_Init init) {
+  final port = ReceivePort();
+  init.reply.send(port.sendPort);
+  late final _Detector detector;
+  var ready = false;
+  String? failure;
+  try {
+    detector = _Detector(init.model);
+    ready = true;
+  } catch (e) {
+    failure = 'Модель ашылмады: $e';
+  }
+  final tracker = CentroidTracker();
+  GateCounter? gate;
+  port.listen((msg) {
+    if (!ready) {
+      init.reply.send(failure);
+      return;
+    }
+    if (msg == null) {
+      init.reply.send(<int>[gate?.nIn ?? 0, gate?.nOut ?? 0]);
+      detector.close();
+      port.close();
+      return;
+    }
+    try {
+      final bytes = (msg as TransferableTypedData).materialize().asUint8List();
+      final image = img.decodeJpg(bytes);
+      if (image != null) {
+        final w = image.width.toDouble(), h = image.height.toDouble();
+        gate ??= GateCounter(
+          ax: init.p1x * w,
+          ay: init.p1y * h,
+          bx: init.p2x * w,
+          by: init.p2y * h,
+          margin: h * 0.02,
+          limitToSegment: true,
+        );
+        gate!.update(tracker.update(nms(detector.detect(image))));
+      }
+      init.reply.send(0);
+    } catch (e) {
+      init.reply.send('Кадрды өңдеу қатесі: $e');
+    }
+  });
+}
+
+class _Detector {
+  _Detector(Uint8List model) : _interpreter = Interpreter.fromBuffer(model) {
+    final firstIsScores = _interpreter.getOutputTensor(0).shape.last == numClasses;
+    _scoresIdx = firstIsScores ? 0 : 1;
+    _boxesIdx = firstIsScores ? 1 : 0;
+    final n = _anchors.length ~/ 4;
+    _scoresOut = List.generate(
+        1, (_) => List.generate(n, (_) => List<double>.filled(numClasses, 0)));
+    _boxesOut = List.generate(
+        1, (_) => List.generate(n, (_) => List<double>.filled(4, 0)));
+    _scores = Float32List(n * numClasses);
+    _boxes = Float32List(n * 4);
   }
 
-  GateCounter _makeGate(double w, double h, GateLine line) {
-    final (a, b) = line.ordered;
-    return GateCounter(
-      ax: a.dx * w,
-      ay: a.dy * h,
-      bx: b.dx * w,
-      by: b.dy * h,
-      margin: h * 0.02,
-      limitToSegment: true,
-    );
-  }
+  final Interpreter _interpreter;
+  late final int _scoresIdx, _boxesIdx;
+  final Float32List _anchors = buildAnchors();
+  late final List<List<List<double>>> _scoresOut, _boxesOut;
+  late final Float32List _scores, _boxes;
+  final Float32List _input = Float32List(inputSize * inputSize * 3);
 
-  List<Detection> _detect(img.Image image) {
-    final scale = inputSize / (image.width > image.height ? image.width : image.height);
+  void close() => _interpreter.close();
+
+  List<Detection> detect(img.Image image) {
+    final scale =
+        inputSize / (image.width > image.height ? image.width : image.height);
     final nw = (image.width * scale).round();
     final nh = (image.height * scale).round();
-    final resized = img.copyResize(image, width: nw, height: nh);
-    final canvas = img.Image(width: inputSize, height: inputSize);
-    img.compositeImage(canvas, resized);
+    final resized = (nw == image.width && nh == image.height)
+        ? image
+        : img.copyResize(image, width: nw, height: nh);
 
-    final input = Float32List(inputSize * inputSize * 3);
-    var k = 0;
-    for (var y = 0; y < inputSize; y++) {
-      for (var x = 0; x < inputSize; x++) {
-        final p = canvas.getPixel(x, y);
-        input[k++] = (p.r - 127.5) / 127.5;
-        input[k++] = (p.g - 127.5) / 127.5;
-        input[k++] = (p.b - 127.5) / 127.5;
+    _input.fillRange(0, _input.length, -1.0); // black padding
+    for (var y = 0; y < nh; y++) {
+      for (var x = 0; x < nw; x++) {
+        final p = resized.getPixel(x, y);
+        final k = (y * inputSize + x) * 3;
+        _input[k] = (p.r - 127.5) / 127.5;
+        _input[k + 1] = (p.g - 127.5) / 127.5;
+        _input[k + 2] = (p.b - 127.5) / 127.5;
       }
     }
 
-    final n = _anchors.length ~/ 4;
-    final scoresOut = List.generate(
-        1, (_) => List.generate(n, (_) => List<double>.filled(numClasses, 0)));
-    final boxesOut =
-        List.generate(1, (_) => List.generate(n, (_) => List<double>.filled(4, 0)));
     _interpreter.runForMultipleInputs(
-      [input.reshape([1, inputSize, inputSize, 3])],
-      {_scoresIdx: scoresOut, _boxesIdx: boxesOut},
+      [_input.reshape([1, inputSize, inputSize, 3])],
+      {_scoresIdx: _scoresOut, _boxesIdx: _boxesOut},
     );
 
-    final scores = Float32List(n * numClasses);
-    final boxes = Float32List(n * 4);
+    final n = _anchors.length ~/ 4;
     for (var i = 0; i < n; i++) {
+      final row = _scoresOut[0][i];
       for (var c = 0; c < numClasses; c++) {
-        scores[i * numClasses + c] = scoresOut[0][i][c];
+        _scores[i * numClasses + c] = row[c];
       }
+      final b = _boxesOut[0][i];
       for (var c = 0; c < 4; c++) {
-        boxes[i * 4 + c] = boxesOut[0][i][c];
+        _boxes[i * 4 + c] = b[c];
       }
     }
-    return decode(boxes, scores, _anchors, scale: scale);
+    return decode(_boxes, _scores, _anchors, scale: scale);
   }
 }

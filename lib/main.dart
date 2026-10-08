@@ -100,6 +100,7 @@ class _CountPageState extends State<CountPage> {
   int _out = 0;
   String _path = '';
   GateLine _line = GateLine.initial;
+  bool _dragging = false;
   double? _progress;
   String? _error;
 
@@ -174,6 +175,7 @@ class _CountPageState extends State<CountPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Жаңа санау')),
       body: SingleChildScrollView(
+        physics: _dragging ? const NeverScrollableScrollPhysics() : null,
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
@@ -184,7 +186,11 @@ class _CountPageState extends State<CountPage> {
                 label: const Text('Бейне таңдау'),
               )
             else ...[
-              AspectRatio(
+              Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.42),
+                  child: AspectRatio(
                 aspectRatio: v.value.aspectRatio,
                 child: LayoutBuilder(
                   builder: (context, c) => Stack(
@@ -194,18 +200,32 @@ class _CountPageState extends State<CountPage> {
                         child: GateLineEditor(
                           line: _line,
                           onChanged: (l) => setState(() => _line = l),
+                          onDragging: (d) => setState(() => _dragging = d),
                         ),
                       ),
                     ],
                   ),
                 ),
               ),
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: Text(
-                  'Қызыл сызықтың екі ұшын сүйреп, қақпаға қойыңыз '
-                  '(көлденең, тік немесе қиғаш). Көрсеткі жаққа өту = кірді.',
-                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Қызыл сызықтың 1 және 2 нүктелерін сүйреп, қақпаға қойыңыз. '
+                        'Көрсеткі жаққа өту = кірді.',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => setState(() => _line =
+                          GateLine.initial.copyWith(invert: _line.invert)),
+                      child: const Text('Қалпына келтіру'),
+                    ),
+                  ],
                 ),
               ),
               SwitchListTile(
