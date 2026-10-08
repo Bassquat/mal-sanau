@@ -47,4 +47,12 @@ void main() {
     }
     expect(ids.length, 1);
   });
+
+  test('a new animal far from the one that just left gets its own id', () {
+    final t = CentroidTracker(maxDist: 90);
+    final first = t.update([Detection(182, 186, 41, 69, 0.8)]);
+    // Next frame: a large cow appears on the other side of the frame.
+    final second = t.update([Detection(78, 116, 202, 155, 0.8)]);
+    expect(second.keys.toSet().intersection(first.keys.toSet()), isEmpty);
+  });
 }

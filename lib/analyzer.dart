@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -103,7 +104,7 @@ void _worker(_Init init) {
   } catch (e) {
     failure = 'Модель ашылмады: $e';
   }
-  final tracker = CentroidTracker();
+  CentroidTracker? tracker;
   GateCounter? gate;
   port.listen((msg) {
     if (!ready) {
@@ -129,7 +130,8 @@ void _worker(_Init init) {
           margin: h * 0.02,
           limitToSegment: true,
         );
-        gate!.update(tracker.update(nms(detector.detect(image))));
+        tracker ??= CentroidTracker(maxDist: 0.25 * math.sqrt(w * w + h * h));
+        gate!.update(tracker!.update(nms(detector.detect(image))));
       }
       init.reply.send(0);
     } catch (e) {

@@ -105,10 +105,19 @@ class _Track {
 /// track within [maxDistFactor] x the larger box side; tracks are dropped
 /// after [maxMissed] frames without a match.
 class CentroidTracker {
-  CentroidTracker({this.maxDistFactor = 0.8, this.maxMissed = 5});
+  CentroidTracker({
+    this.maxDistFactor = 0.8,
+    this.maxMissed = 5,
+    this.maxDist = double.infinity,
+  });
 
   final double maxDistFactor;
   final int maxMissed;
+
+  /// Absolute cap (pixels) on the match distance. Without it a large box
+  /// near the camera allows a match across half the frame, so the next animal
+  /// entering took over the id of the one that had just left.
+  final double maxDist;
   final List<_Track> _tracks = [];
   int _nextId = 1;
 
@@ -124,8 +133,9 @@ class CentroidTracker {
         final py = _tracks[t].cy + _tracks[t].vy * steps;
         final dist = math.sqrt(
             math.pow(px - dets[d].cx, 2) + math.pow(py - dets[d].cy, 2));
-        final limit =
-            maxDistFactor * math.max(dets[d].w, dets[d].h).clamp(1, 1e9);
+        final limit = math.min(
+            maxDistFactor * math.max(dets[d].w, dets[d].h).clamp(1, 1e9),
+            maxDist);
         if (dist <= limit) pairs.add((dist, t, d));
       }
     }
