@@ -42,7 +42,7 @@ void main() {
   test('tracker keeps the id of an accelerating object', () {
     final t = CentroidTracker();
     final ids = <int>{};
-    for (final x in [50.0, 80, 120, 170]) {
+    for (final x in <double>[50, 80, 120, 170]) {
       ids.addAll(t.update([Detection(x, 50, 40, 40, 0.9)]).keys);
     }
     expect(ids.length, 1);
