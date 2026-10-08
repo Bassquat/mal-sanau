@@ -6,6 +6,8 @@ import 'package:video_player/video_player.dart';
 
 import 'analyzer.dart';
 import 'gate_line.dart';
+import 'herd.dart';
+import 'herd_page.dart';
 import 'history_store.dart';
 
 void main() => runApp(const MalSanauApp());
@@ -34,6 +36,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _store = HistoryStore();
   List<CountEntry> _entries = [];
+  int _tab = 0;
 
   @override
   void initState() {
@@ -58,27 +61,39 @@ class _HomePageState extends State<HomePage> {
       '${t.day.toString().padLeft(2, '0')}.${t.month.toString().padLeft(2, '0')} '
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
+  Widget _history() => _entries.isEmpty
+      ? const Center(child: Text('Тарих бос. Жаңа санауды бастаңыз.'))
+      : ListView(
+          children: [
+            for (final e in _entries)
+              ListTile(
+                title: Text('Баланс: ${e.balance}'),
+                subtitle: Text(
+                    '${_fmt(e.time)} · кірді ${e.nIn}, шықты ${e.nOut}\n${e.source}'),
+                isThreeLine: true,
+              ),
+          ],
+        );
+
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Мал санау')),
-        body: _entries.isEmpty
-            ? const Center(child: Text('Тарих бос. Жаңа санауды бастаңыз.'))
-            : ListView(
-                children: [
-                  for (final e in _entries)
-                    ListTile(
-                      title: Text('Баланс: ${e.balance}'),
-                      subtitle: Text(
-                          '${_fmt(e.time)} · кірді ${e.nIn}, шықты ${e.nOut}\n${e.source}'),
-                      isThreeLine: true,
-                    ),
-                ],
-              ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _newCount,
-          icon: const Icon(Icons.add),
-          label: const Text('Жаңа санау'),
+        appBar: AppBar(title: Text(_tab == 0 ? 'Мал санау' : 'Менің малым')),
+        body: _tab == 0 ? _history() : const HerdTab(),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _tab,
+          onDestinationSelected: (i) => setState(() => _tab = i),
+          destinations: const [
+            NavigationDestination(icon: Icon(Icons.history), label: 'Санау'),
+            NavigationDestination(icon: Icon(Icons.pets), label: 'Мал'),
+          ],
         ),
+        floatingActionButton: _tab == 0
+            ? FloatingActionButton.extended(
+                onPressed: _newCount,
+                icon: const Icon(Icons.add),
+                label: const Text('Жаңа санау'),
+              )
+            : null,
       );
 }
 
@@ -103,6 +118,15 @@ class _CountPageState extends State<CountPage> {
   bool _dragging = false;
   double? _progress;
   String? _error;
+  int? _registered;
+
+  @override
+  void initState() {
+    super.initState();
+    HerdStore().load().then((h) {
+      if (mounted) setState(() => _registered = h.totalAlive);
+    });
+  }
 
   @override
   void dispose() {
@@ -278,6 +302,11 @@ class _CountPageState extends State<CountPage> {
                 ),
               ],
             ),
+            if ((_registered ?? 0) > 0) ...[
+              const SizedBox(height: 8),
+              Text('Тіркелген тірі мал: $_registered, санау балансы: ${_in - _out}',
+                  style: const TextStyle(color: Colors.grey)),
+            ],
             const SizedBox(height: 12),
             const Text('Автоматты нәтижені қолмен түзетуге болады.',
                 style: TextStyle(color: Colors.grey)),
