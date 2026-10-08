@@ -30,6 +30,8 @@ class VideoAnalyzer {
     return VideoAnalyzer._(data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
   }
 
+  Uint8List get modelBytes => _model;
+
   void close() {}
 
   /// Frames are pulled here (native work, async) and decoded, detected and
@@ -43,7 +45,7 @@ class VideoAnalyzer {
   }) async {
     final rp = ReceivePort();
     final events = StreamIterator<dynamic>(rp);
-    final isolate = await Isolate.spawn(_worker, _Init(rp.sendPort, _model, line));
+    final isolate = await Isolate.spawn(analysisWorker, WorkerInit(rp.sendPort, _model, line));
     try {
       await events.moveNext();
       final worker = events.current as SendPort;
@@ -81,8 +83,8 @@ class VideoAnalyzer {
   }
 }
 
-class _Init {
-  _Init(this.reply, this.model, GateLine line)
+class WorkerInit {
+  WorkerInit(this.reply, this.model, GateLine line)
       : p1x = line.ordered.$1.dx,
         p1y = line.ordered.$1.dy,
         p2x = line.ordered.$2.dx,
@@ -92,7 +94,7 @@ class _Init {
   final double p1x, p1y, p2x, p2y;
 }
 
-void _worker(_Init init) {
+void analysisWorker(WorkerInit init) {
   final port = ReceivePort();
   init.reply.send(port.sendPort);
   late final _Detector detector;
@@ -118,8 +120,9 @@ void _worker(_Init init) {
       return;
     }
     try {
-      final bytes = (msg as TransferableTypedData).materialize().asUint8List();
-      final image = img.decodeJpg(bytes);
+      final image = msg is TransferableTypedData
+          ? img.decodeJpg(msg.materialize().asUint8List())
+          : yuvMessageToImage(msg as List);
       if (image != null) {
         final w = image.width.toDouble(), h = image.height.toDouble();
         gate ??= GateCounter(
@@ -133,7 +136,7 @@ void _worker(_Init init) {
         tracker ??= CentroidTracker(maxDist: 0.25 * math.sqrt(w * w + h * h));
         gate!.update(tracker!.update(nms(detector.detect(image))));
       }
-      init.reply.send(0);
+      init.reply.send(<int>[gate?.nIn ?? 0, gate?.nOut ?? 0]);
     } catch (e) {
       init.reply.send('Кадрды өңдеу қатесі: $e');
     }
@@ -201,4 +204,33 @@ class _Detector {
     }
     return decode(_boxes, _scores, _anchors, scale: scale);
   }
+}
+
+/// Builds an RGB image from a camera YUV420 frame sent as
+/// [w, h, yStride, uvStride, uvPixelStride, rotationDegrees, y, u, v], where
+/// y, u and v are [TransferableTypedData]. The result is rotated clockwise by
+/// the rotation so it matches the upright preview.
+img.Image yuvMessageToImage(List m) {
+  final w = m[0] as int, h = m[1] as int;
+  final yStride = m[2] as int, uvStride = m[3] as int, uvPix = m[4] as int;
+  final rot = m[5] as int;
+  final y = (m[6] as TransferableTypedData).materialize().asUint8List();
+  final u = (m[7] as TransferableTypedData).materialize().asUint8List();
+  final v = (m[8] as TransferableTypedData).materialize().asUint8List();
+  final out = img.Image(width: w, height: h);
+  for (var j = 0; j < h; j++) {
+    for (var i = 0; i < w; i++) {
+      final yy = y[j * yStride + i];
+      final k = (j >> 1) * uvStride + (i >> 1) * uvPix;
+      final uu = u[k] - 128, vv = v[k] - 128;
+      out.setPixelRgb(
+        i,
+        j,
+        (yy + 1.402 * vv).round().clamp(0, 255),
+        (yy - 0.344136 * uu - 0.714136 * vv).round().clamp(0, 255),
+        (yy + 1.772 * uu).round().clamp(0, 255),
+      );
+    }
+  }
+  return rot == 0 ? out : img.copyRotate(out, angle: rot);
 }

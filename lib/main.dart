@@ -8,6 +8,7 @@ import 'analyzer.dart';
 import 'gate_line.dart';
 import 'herd.dart';
 import 'herd_page.dart';
+import 'live_page.dart';
 import 'history_store.dart';
 
 void main() => runApp(const MalSanauApp());
@@ -49,6 +50,14 @@ class _HomePageState extends State<HomePage> {
     if (mounted) setState(() => _entries = e);
   }
 
+  Future<void> _liveCount() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => LivePage(store: _store)),
+    );
+    _reload();
+  }
+
   Future<void> _newCount() async {
     await Navigator.push(
       context,
@@ -88,10 +97,24 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
         floatingActionButton: _tab == 0
-            ? FloatingActionButton.extended(
-                onPressed: _newCount,
-                icon: const Icon(Icons.add),
-                label: const Text('Жаңа санау'),
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  FloatingActionButton.extended(
+                    heroTag: 'live',
+                    onPressed: _liveCount,
+                    icon: const Icon(Icons.videocam),
+                    label: const Text('Тікелей санау'),
+                  ),
+                  const SizedBox(height: 12),
+                  FloatingActionButton.extended(
+                    heroTag: 'video',
+                    onPressed: _newCount,
+                    icon: const Icon(Icons.video_library),
+                    label: const Text('Бейне санау'),
+                  ),
+                ],
               )
             : null,
       );

@@ -34,6 +34,10 @@ jobs:
           find "$PUB_CACHE/hosted" -path '*/android/build.gradle' -print0 | xargs -0 -r sed -i 's/jcenter()/mavenCentral()/g'
           sed -i -E 's/minSdk(Version)?( =)? *flutter\.minSdkVersion/minSdk = 26/' android/app/build.gradle.kts || true
           sed -i -E 's/minSdkVersion flutter\.minSdkVersion/minSdkVersion 26/' android/app/build.gradle || true
+      - name: Camera permission
+        run: |
+          sed -i 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|&\n    <uses-permission android:name="android.permission.CAMERA"/>|' android/app/src/main/AndroidManifest.xml
+          grep -n CAMERA android/app/src/main/AndroidManifest.xml
       - run: flutter test
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
