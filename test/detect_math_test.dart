@@ -38,4 +38,13 @@ void main() {
     final f3 = t.update([Detection(60, 55, 40, 40, 0.9), Detection(300, 300, 40, 40, 0.9)]);
     expect(f3.length, 2);
   });
+
+  test('tracker keeps the id of an accelerating object', () {
+    final t = CentroidTracker();
+    final ids = <int>{};
+    for (final x in [50.0, 80, 120, 170]) {
+      ids.addAll(t.update([Detection(x, 50, 40, 40, 0.9)]).keys);
+    }
+    expect(ids.length, 1);
+  });
 }

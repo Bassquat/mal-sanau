@@ -86,4 +86,13 @@ void main() {
     expect(free.nIn, 2);
     expect(limited.nIn, 1);
   });
+
+  test('fast crossing that lands outside the segment span still counts', () {
+    // Gate is the short segment x 40..60; the animal crosses at x=50 and
+    // lands at x=150 within one step.
+    final g = GateCounter(
+        ax: 40, ay: 100, bx: 60, by: 100, limitToSegment: true);
+    run(g, {1: [(45, 70), (55, 140)]});
+    expect(g.nIn, 1);
+  });
 }

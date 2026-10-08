@@ -26,6 +26,7 @@ class GateCounter {
   int nIn = 0;
   int nOut = 0;
   final Map<int, int> _side = {};
+  final Map<int, (double, double)> _lastOnSide = {};
 
   int get balance => nIn - nOut;
 
@@ -36,7 +37,14 @@ class GateCounter {
     return (dx * (y - ay) - dy * (x - ax)) / length;
   }
 
-  bool _withinSegment(double x, double y) {
+  /// Does the step from [p] to [q] cross the line inside the a-b segment
+  /// (10% tolerance at each end)? The crossing point itself is tested, not the
+  /// landing point, so a fast animal that ends up far from the line still
+  /// counts if it crossed within the gate.
+  bool _crossesSegment((double, double) p, (double, double) q) {
+    final dp = _signedDist(p.$1, p.$2), dq = _signedDist(q.$1, q.$2);
+    final k = dp / (dp - dq);
+    final x = p.$1 + (q.$1 - p.$1) * k, y = p.$2 + (q.$2 - p.$2) * k;
     final dx = bx - ax, dy = by - ay;
     final t = ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy);
     return t >= -0.1 && t <= 1.1;
@@ -49,16 +57,18 @@ class GateCounter {
       if (d.abs() < margin) return;
       final side = d > 0 ? 1 : -1;
       final prev = _side[id];
-      if (prev != null &&
-          prev != side &&
-          (!limitToSegment || _withinSegment(p.$1, p.$2))) {
-        if (side > 0) {
-          nIn++;
-        } else {
-          nOut++;
+      if (prev != null && prev != side) {
+        final from = _lastOnSide[id];
+        if (!limitToSegment || from == null || _crossesSegment(from, p)) {
+          if (side > 0) {
+            nIn++;
+          } else {
+            nOut++;
+          }
         }
       }
       _side[id] = side;
+      _lastOnSide[id] = p;
     });
   }
 }

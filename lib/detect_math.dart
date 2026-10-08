@@ -53,7 +53,7 @@ List<Detection> decode(
   Float32List scores,
   Float32List anchors, {
   required double scale,
-  double threshold = 0.35,
+  double threshold = 0.3,
   Set<int> classIds = livestockClassIds,
 }) {
   final n = anchors.length ~/ 4;
@@ -97,6 +97,7 @@ class _Track {
   _Track(this.id, this.cx, this.cy, this.size);
   final int id;
   double cx, cy, size;
+  double vx = 0, vy = 0; // smoothed motion per frame
   int missed = 0;
 }
 
@@ -104,7 +105,7 @@ class _Track {
 /// track within [maxDistFactor] x the larger box side; tracks are dropped
 /// after [maxMissed] frames without a match.
 class CentroidTracker {
-  CentroidTracker({this.maxDistFactor = 0.8, this.maxMissed = 3});
+  CentroidTracker({this.maxDistFactor = 0.8, this.maxMissed = 5});
 
   final double maxDistFactor;
   final int maxMissed;
@@ -116,9 +117,13 @@ class CentroidTracker {
     final pairs = <(double, int, int)>[];
     for (var t = 0; t < _tracks.length; t++) {
       for (var d = 0; d < dets.length; d++) {
+        // Compare against where the track should be now, so fast animals
+        // that jump between frames keep their id.
+        final steps = _tracks[t].missed + 1;
+        final px = _tracks[t].cx + _tracks[t].vx * steps;
+        final py = _tracks[t].cy + _tracks[t].vy * steps;
         final dist = math.sqrt(
-            math.pow(_tracks[t].cx - dets[d].cx, 2) +
-                math.pow(_tracks[t].cy - dets[d].cy, 2));
+            math.pow(px - dets[d].cx, 2) + math.pow(py - dets[d].cy, 2));
         final limit =
             maxDistFactor * math.max(dets[d].w, dets[d].h).clamp(1, 1e9);
         if (dist <= limit) pairs.add((dist, t, d));
@@ -133,6 +138,9 @@ class CentroidTracker {
       usedD.add(p.$3);
       final tr = _tracks[p.$2];
       final d = dets[p.$3];
+      final steps = tr.missed + 1;
+      tr.vx = 0.5 * tr.vx + 0.5 * (d.cx - tr.cx) / steps;
+      tr.vy = 0.5 * tr.vy + 0.5 * (d.cy - tr.cy) / steps;
       tr
         ..cx = d.cx
         ..cy = d.cy
