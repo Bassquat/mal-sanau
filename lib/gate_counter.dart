@@ -12,10 +12,17 @@ class GateCounter {
     required this.bx,
     required this.by,
     this.margin = 6.0,
+    this.limitToSegment = false,
   });
 
   final double ax, ay, bx, by;
   final double margin;
+
+  /// Count only crossings whose point projects onto the a-b segment
+  /// (with a 10% tolerance at each end), so animals walking past the end of
+  /// the drawn line are not counted.
+  final bool limitToSegment;
+
   int nIn = 0;
   int nOut = 0;
   final Map<int, int> _side = {};
@@ -29,6 +36,12 @@ class GateCounter {
     return (dx * (y - ay) - dy * (x - ax)) / length;
   }
 
+  bool _withinSegment(double x, double y) {
+    final dx = bx - ax, dy = by - ay;
+    final t = ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy);
+    return t >= -0.1 && t <= 1.1;
+  }
+
   /// [tracks] maps track id -> (x, y) centroid for the current frame.
   void update(Map<int, (double, double)> tracks) {
     tracks.forEach((id, p) {
@@ -36,7 +49,9 @@ class GateCounter {
       if (d.abs() < margin) return;
       final side = d > 0 ? 1 : -1;
       final prev = _side[id];
-      if (prev != null && prev != side) {
+      if (prev != null &&
+          prev != side &&
+          (!limitToSegment || _withinSegment(p.$1, p.$2))) {
         if (side > 0) {
           nIn++;
         } else {

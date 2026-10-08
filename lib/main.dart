@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 
 import 'analyzer.dart';
+import 'gate_line.dart';
 import 'history_store.dart';
 
 void main() => runApp(const MalSanauApp());
@@ -98,8 +99,7 @@ class _CountPageState extends State<CountPage> {
   int _in = 0;
   int _out = 0;
   String _path = '';
-  double _line = 0.5;
-  bool _invert = false;
+  GateLine _line = GateLine.initial;
   double? _progress;
   String? _error;
 
@@ -139,8 +139,7 @@ class _CountPageState extends State<CountPage> {
       final r = await analyzer.analyze(
         _path,
         durationMs: v.value.duration.inMilliseconds,
-        lineFraction: _line,
-        invert: _invert,
+        line: _line,
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
         },
@@ -191,34 +190,29 @@ class _CountPageState extends State<CountPage> {
                   builder: (context, c) => Stack(
                     children: [
                       Positioned.fill(child: VideoPlayer(v)),
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        top: c.maxHeight * _line,
-                        child: Container(height: 2, color: Colors.redAccent),
+                      Positioned.fill(
+                        child: GateLineEditor(
+                          line: _line,
+                          onChanged: (l) => setState(() => _line = l),
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
-              Row(
-                children: [
-                  const Text('Қақпа сызығы'),
-                  Expanded(
-                    child: Slider(
-                      value: _line,
-                      min: 0.1,
-                      max: 0.9,
-                      onChanged: (x) => setState(() => _line = x),
-                    ),
-                  ),
-                ],
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  'Қызыл сызықтың екі ұшын сүйреп, қақпаға қойыңыз '
+                  '(көлденең, тік немесе қиғаш). Көрсеткі жаққа өту = кірді.',
+                  style: TextStyle(color: Colors.grey),
+                ),
               ),
               SwitchListTile(
                 dense: true,
-                title: const Text('Бағытты ауыстыру (төмен = шықты)'),
-                value: _invert,
-                onChanged: (x) => setState(() => _invert = x),
+                title: const Text('Бағытты ауыстыру (кірді ↔ шықты)'),
+                value: _line.invert,
+                onChanged: (x) => setState(() => _line = _line.copyWith(invert: x)),
               ),
               if (_progress != null)
                 LinearProgressIndicator(value: _progress)

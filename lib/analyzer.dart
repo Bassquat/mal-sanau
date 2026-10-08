@@ -6,6 +6,7 @@ import 'package:video_thumbnail/video_thumbnail.dart';
 
 import 'detect_math.dart';
 import 'gate_counter.dart';
+import 'gate_line.dart';
 
 class AnalysisResult {
   AnalysisResult(this.nIn, this.nOut, this.frames);
@@ -13,9 +14,8 @@ class AnalysisResult {
 }
 
 /// Offline analysis of a video: sample frames, detect livestock with
-/// EfficientDet-Lite0, track them and count crossings of a horizontal gate
-/// line placed at [lineFraction] of the frame height. Moving down = "in"
-/// unless [invert] is set.
+/// EfficientDet-Lite0, track them and count crossings of a gate line drawn at
+/// any angle (see [GateLine]); crossing towards the arrow side = "in".
 class VideoAnalyzer {
   VideoAnalyzer._(this._interpreter, this._scoresIdx, this._boxesIdx);
 
@@ -35,8 +35,7 @@ class VideoAnalyzer {
   Future<AnalysisResult> analyze(
     String videoPath, {
     required int durationMs,
-    required double lineFraction,
-    bool invert = false,
+    required GateLine line,
     int fps = 4,
     void Function(double progress)? onProgress,
   }) async {
@@ -59,7 +58,7 @@ class VideoAnalyzer {
       frames++;
 
       final w = image.width.toDouble(), h = image.height.toDouble();
-      gate ??= _makeGate(w, h, lineFraction, invert);
+      gate ??= _makeGate(w, h, line);
       final dets = nms(_detect(image));
       gate.update(tracker.update(dets));
     }
@@ -67,11 +66,16 @@ class VideoAnalyzer {
     return AnalysisResult(gate?.nIn ?? 0, gate?.nOut ?? 0, frames);
   }
 
-  GateCounter _makeGate(double w, double h, double frac, bool invert) {
-    final y = h * frac;
-    return invert
-        ? GateCounter(ax: w, ay: y, bx: 0, by: y, margin: h * 0.02)
-        : GateCounter(ax: 0, ay: y, bx: w, by: y, margin: h * 0.02);
+  GateCounter _makeGate(double w, double h, GateLine line) {
+    final (a, b) = line.ordered;
+    return GateCounter(
+      ax: a.dx * w,
+      ay: a.dy * h,
+      bx: b.dx * w,
+      by: b.dy * h,
+      margin: h * 0.02,
+      limitToSegment: true,
+    );
   }
 
   List<Detection> _detect(img.Image image) {
