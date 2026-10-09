@@ -205,6 +205,9 @@ class _CountPageState extends State<CountPage> {
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
         },
+        onDecoderBusy: () async {
+          await v.pause();
+        },
         onFrame: (f) {
           if (!mounted) return;
           _frames.add(f);

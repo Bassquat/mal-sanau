@@ -82,6 +82,7 @@ class VideoAnalyzer {
     int fps = 4,
     void Function(double progress)? onProgress,
     void Function(FrameInfo frame)? onFrame,
+    Future<void> Function()? onDecoderBusy,
   }) async {
     final rp = ReceivePort();
     final events = StreamIterator<dynamic>(rp);
@@ -91,7 +92,12 @@ class VideoAnalyzer {
       final worker = events.current as SendPort;
       var frames = 0;
       final step = 1000 ~/ fps;
-      Future<Uint8List?> fetch(int t) => VideoThumbnail.thumbnailData(
+      // On Android the plugin reports a frame the phone could not decode (for
+      // instance while the player holds the hardware decoder) as
+      // MissingPluginException, so any failure here means "no frame".
+      Future<Uint8List?> grab(int t) async {
+        try {
+          return await VideoThumbnail.thumbnailData(
             video: videoPath,
             imageFormat: ImageFormat.JPEG,
             maxWidth: inputSize,
@@ -99,6 +105,23 @@ class VideoAnalyzer {
             timeMs: t,
             quality: 70,
           );
+        } catch (_) {
+          return null;
+        }
+      }
+
+      var busyReported = false;
+      Future<Uint8List?> fetch(int t) async {
+        var b = await grab(t);
+        if (b == null && !busyReported && onDecoderBusy != null) {
+          // Free the decoder (pause the player) and try this frame again.
+          busyReported = true;
+          await onDecoderBusy();
+          b = await grab(t);
+        }
+        return b;
+      }
+
       // The next frame is extracted while the worker detects the current one.
       Future<Uint8List?>? next = durationMs > 0 ? fetch(0) : null;
       for (var t = 0; t < durationMs; t += step) {
@@ -113,6 +136,7 @@ class VideoAnalyzer {
         onFrame?.call(FrameInfo.fromReply(t, r as List));
         frames++;
       }
+      if (frames == 0) throw Exception('Бейнеден кадр алу мүмкін болмады');
       worker.send(null);
       await events.moveNext();
       final r = events.current;
