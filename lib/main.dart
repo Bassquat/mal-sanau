@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 
 import 'analyzer.dart';
+import 'count_overlay.dart';
 import 'gate_line.dart';
 import 'herd.dart';
 import 'herd_page.dart';
@@ -143,6 +144,9 @@ class _CountPageState extends State<CountPage> {
   double? _progress;
   String? _error;
   int? _registered;
+  final List<FrameInfo> _frames = [];
+  final List<CountEvent> _events = [];
+  int _seqIn = 0, _seqOut = 0;
 
   @override
   void initState() {
@@ -177,11 +181,20 @@ class _CountPageState extends State<CountPage> {
   Future<void> _auto() async {
     final v = _video;
     if (v == null) return;
-    await v.pause();
+    _frames.clear();
+    _events.clear();
+    _seqIn = _seqOut = 0;
     setState(() {
       _progress = 0;
       _error = null;
+      _in = 0;
+      _out = 0;
     });
+    // The video plays (silently) while it is being analysed, so the marks on
+    // the animals follow the picture and the total is ready when it ends.
+    await v.setVolume(0);
+    await v.seekTo(Duration.zero);
+    await v.play();
     VideoAnalyzer? analyzer;
     try {
       analyzer = await VideoAnalyzer.load();
@@ -191,6 +204,18 @@ class _CountPageState extends State<CountPage> {
         line: _line,
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
+        },
+        onFrame: (f) {
+          if (!mounted) return;
+          _frames.add(f);
+          for (final c in f.crossings) {
+            _events.add(CountEvent(
+                f.timeMs, c.$1, c.$2, c.$2 > 0 ? ++_seqIn : ++_seqOut, c.$3, c.$4));
+          }
+          setState(() {
+            _in = f.nIn;
+            _out = f.nOut;
+          });
         },
       );
       if (mounted) {
@@ -244,6 +269,16 @@ class _CountPageState extends State<CountPage> {
                   builder: (context, c) => Stack(
                     children: [
                       Positioned.fill(child: VideoPlayer(v)),
+                      Positioned.fill(
+                        child: ValueListenableBuilder<VideoPlayerValue>(
+                          valueListenable: v,
+                          builder: (_, val, __) => CountOverlay(
+                            frames: _frames,
+                            events: _events,
+                            positionMs: val.position.inMilliseconds,
+                          ),
+                        ),
+                      ),
                       Positioned.fill(
                         child: GateLineEditor(
                           line: _line,
@@ -300,6 +335,18 @@ class _CountPageState extends State<CountPage> {
                     v.value.isPlaying ? v.pause() : v.play()),
               ),
             ],
+            if (_in + _out > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Wrap(
+                  spacing: 16,
+                  runSpacing: 4,
+                  children: [
+                    TallyMarks(count: _in, color: Colors.green.shade700),
+                    TallyMarks(count: _out, color: Colors.red.shade700),
+                  ],
+                ),
+              ),
             const SizedBox(height: 8),
             Text('Баланс: ${_in - _out}',
                 style: Theme.of(context).textTheme.headlineMedium),

@@ -51,7 +51,9 @@ class GateCounter {
   }
 
   /// [tracks] maps track id -> (x, y) centroid for the current frame.
-  void update(Map<int, (double, double)> tracks) {
+  /// Returns the crossings counted in this frame as (track id, +1 in / -1 out).
+  List<(int, int)> update(Map<int, (double, double)> tracks) {
+    final events = <(int, int)>[];
     tracks.forEach((id, p) {
       final d = _signedDist(p.$1, p.$2);
       if (d.abs() < margin) return;
@@ -65,10 +67,12 @@ class GateCounter {
           } else {
             nOut++;
           }
+          events.add((id, side));
         }
       }
       _side[id] = side;
       _lastOnSide[id] = p;
     });
+    return events;
   }
 }

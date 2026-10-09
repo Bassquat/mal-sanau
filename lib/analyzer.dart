@@ -12,6 +12,45 @@ import 'detect_math.dart';
 import 'gate_counter.dart';
 import 'gate_line.dart';
 
+/// One tracked animal in a frame; x and y are fractions of the frame.
+class TrackMark {
+  const TrackMark(this.id, this.x, this.y);
+  final int id;
+  final double x, y;
+}
+
+/// An animal that was just counted at (x, y); [dir] is +1 for in, -1 for out
+/// and [seq] its running number within that direction.
+class CountEvent {
+  const CountEvent(this.timeMs, this.id, this.dir, this.seq, this.x, this.y);
+  final int timeMs, id, dir, seq;
+  final double x, y;
+}
+
+class FrameInfo {
+  const FrameInfo(this.timeMs, this.nIn, this.nOut, this.tracks, this.crossings);
+  final int timeMs, nIn, nOut;
+  final List<TrackMark> tracks;
+
+  /// (id, dir, x, y) of animals counted in this frame.
+  final List<(int, int, double, double)> crossings;
+
+  factory FrameInfo.fromReply(int timeMs, List r) {
+    final t = (r[2] as List).cast<double>();
+    final e = (r[3] as List).cast<double>();
+    return FrameInfo(
+      timeMs,
+      r[0] as int,
+      r[1] as int,
+      [for (var i = 0; i + 2 < t.length; i += 3) TrackMark(t[i].toInt(), t[i + 1], t[i + 2])],
+      [
+        for (var i = 0; i + 3 < e.length; i += 4)
+          (e[i].toInt(), e[i + 1].toInt(), e[i + 2], e[i + 3])
+      ],
+    );
+  }
+}
+
 class AnalysisResult {
   AnalysisResult(this.nIn, this.nOut, this.frames);
   final int nIn, nOut, frames;
@@ -42,6 +81,7 @@ class VideoAnalyzer {
     required GateLine line,
     int fps = 4,
     void Function(double progress)? onProgress,
+    void Function(FrameInfo frame)? onFrame,
   }) async {
     final rp = ReceivePort();
     final events = StreamIterator<dynamic>(rp);
@@ -51,21 +91,26 @@ class VideoAnalyzer {
       final worker = events.current as SendPort;
       var frames = 0;
       final step = 1000 ~/ fps;
+      Future<Uint8List?> fetch(int t) => VideoThumbnail.thumbnailData(
+            video: videoPath,
+            imageFormat: ImageFormat.JPEG,
+            maxWidth: inputSize,
+            maxHeight: inputSize,
+            timeMs: t,
+            quality: 70,
+          );
+      // The next frame is extracted while the worker detects the current one.
+      Future<Uint8List?>? next = durationMs > 0 ? fetch(0) : null;
       for (var t = 0; t < durationMs; t += step) {
         onProgress?.call(t / durationMs);
-        final bytes = await VideoThumbnail.thumbnailData(
-          video: videoPath,
-          imageFormat: ImageFormat.JPEG,
-          maxWidth: inputSize,
-          maxHeight: inputSize,
-          timeMs: t,
-          quality: 80,
-        );
+        final bytes = await next;
+        next = t + step < durationMs ? fetch(t + step) : null;
         if (bytes == null) continue;
         worker.send(TransferableTypedData.fromList([bytes]));
         await events.moveNext();
         final r = events.current;
         if (r is String) throw Exception(r);
+        onFrame?.call(FrameInfo.fromReply(t, r as List));
         frames++;
       }
       worker.send(null);
@@ -134,9 +179,26 @@ void analysisWorker(WorkerInit init) {
           limitToSegment: true,
         );
         tracker ??= CentroidTracker(maxDist: 0.25 * math.sqrt(w * w + h * h));
-        gate!.update(tracker!.update(nms(detector.detect(image))));
+        final tracks = tracker!.update(nms(detector.detect(image)));
+        final crossed = gate!.update(tracks);
+        init.reply.send(<Object>[
+          gate!.nIn,
+          gate!.nOut,
+          <double>[
+            for (final e in tracks.entries) ...[e.key.toDouble(), e.value.$1 / w, e.value.$2 / h]
+          ],
+          <double>[
+            for (final c in crossed) ...[
+              c.$1.toDouble(),
+              c.$2.toDouble(),
+              tracks[c.$1]!.$1 / w,
+              tracks[c.$1]!.$2 / h,
+            ]
+          ],
+        ]);
+        return;
       }
-      init.reply.send(<int>[gate?.nIn ?? 0, gate?.nOut ?? 0]);
+      init.reply.send(<Object>[gate?.nIn ?? 0, gate?.nOut ?? 0, <double>[], <double>[]]);
     } catch (e) {
       init.reply.send('Кадрды өңдеу қатесі: $e');
     }

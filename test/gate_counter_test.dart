@@ -14,6 +14,14 @@ void run(GateCounter g, Map<int, List<(double, double)>> paths) {
 }
 
 void main() {
+  test('update reports the crossings it counted', () {
+    final g = gate();
+    expect(g.update({1: (50, 80)}), isEmpty);
+    expect(g.update({1: (50, 120)}), [(1, 1)]);
+    expect(g.update({1: (50, 130)}), isEmpty);
+    expect(g.update({1: (50, 80)}), [(1, -1)]);
+  });
+
   test('in and out', () {
     final g = gate();
     run(g, {

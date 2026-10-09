@@ -49,7 +49,8 @@ class LiveCounter {
       await _events.moveNext();
       final r = _events.current;
       if (r is String) throw Exception(r);
-      return (r as List).cast<int>();
+      final l = r as List;
+      return [l[0] as int, l[1] as int];
     } finally {
       _busy = false;
     }
