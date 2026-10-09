@@ -9,6 +9,7 @@ import 'gate_line.dart';
 import 'herd.dart';
 import 'herd_page.dart';
 import 'live_page.dart';
+import 'stepper.dart';
 import 'history_store.dart';
 
 void main() => runApp(const MalSanauApp());
@@ -309,8 +310,7 @@ class _CountPageState extends State<CountPage> {
                   child: _CounterButton(
                     label: 'Кірді',
                     value: _in,
-                    onAdd: () => setState(() => _in++),
-                    onSub: () => setState(() => _in = _in > 0 ? _in - 1 : 0),
+                    onChanged: (n) => setState(() => _in = n),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -318,9 +318,7 @@ class _CountPageState extends State<CountPage> {
                   child: _CounterButton(
                     label: 'Шықты',
                     value: _out,
-                    onAdd: () => setState(() => _out++),
-                    onSub: () =>
-                        setState(() => _out = _out > 0 ? _out - 1 : 0),
+                    onChanged: (n) => setState(() => _out = n),
                   ),
                 ),
               ],
@@ -352,14 +350,12 @@ class _CounterButton extends StatelessWidget {
   const _CounterButton({
     required this.label,
     required this.value,
-    required this.onAdd,
-    required this.onSub,
+    required this.onChanged,
   });
 
   final String label;
   final int value;
-  final VoidCallback onAdd;
-  final VoidCallback onSub;
+  final ValueChanged<int> onChanged;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -368,17 +364,9 @@ class _CounterButton extends StatelessWidget {
           child: Column(
             children: [
               Text(label),
-              Text('$value',
-                  style: Theme.of(context).textTheme.displaySmall),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  IconButton.outlined(
-                      onPressed: onSub, icon: const Icon(Icons.remove)),
-                  IconButton.filled(
-                      onPressed: onAdd, icon: const Icon(Icons.add)),
-                ],
-              ),
+              const SizedBox(height: 4),
+              FittedBox(
+                  child: CountStepper(value: value, onChanged: onChanged)),
             ],
           ),
         ),

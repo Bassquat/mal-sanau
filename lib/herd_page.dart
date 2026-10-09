@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'herd.dart';
+import 'stepper.dart';
 
 String fmtDate(DateTime t) =>
     '${t.day.toString().padLeft(2, '0')}.${t.month.toString().padLeft(2, '0')}.${t.year}';
@@ -189,23 +190,13 @@ class _SpeciesPageState extends State<SpeciesPage> {
               child: Row(
                 children: [
                   const Expanded(child: Text('Сақинасыз (қолмен сан)')),
-                  IconButton.outlined(
-                      onPressed: () {
-                        _h.setUntagged(_s, u - 1);
-                        _changed();
-                      },
-                      icon: const Icon(Icons.remove)),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('$u',
-                        style: Theme.of(context).textTheme.headlineSmall),
+                  CountStepper(
+                    value: u,
+                    onChanged: (n) {
+                      _h.setUntagged(_s, n);
+                      _changed();
+                    },
                   ),
-                  IconButton.filled(
-                      onPressed: () {
-                        _h.setUntagged(_s, u + 1);
-                        _changed();
-                      },
-                      icon: const Icon(Icons.add)),
                 ],
               ),
             ),
