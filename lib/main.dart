@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'analyzer.dart';
 import 'count_overlay.dart';
 import 'gate_line.dart';
@@ -148,9 +150,20 @@ class _CountPageState extends State<CountPage> {
   final List<CountEvent> _events = [];
   int _seqIn = 0, _seqOut = 0;
 
+  // Dense-crowd mode: counts the picture flow across the line instead of
+  // tracking each animal; _share is the frame share one animal covers.
+  bool _flow = false;
+  double _share = defaultAnimalShare;
+  double _flowIn = 0, _flowOut = 0;
+  bool _analysed = false;
+
   @override
   void initState() {
     super.initState();
+    SharedPreferences.getInstance().then((p) {
+      final v = p.getDouble('flow_share');
+      if (v != null && v > 0 && mounted) setState(() => _share = v);
+    });
     HerdStore().load().then((h) {
       if (mounted) setState(() => _registered = h.totalAlive);
     });
@@ -184,7 +197,9 @@ class _CountPageState extends State<CountPage> {
     _frames.clear();
     _events.clear();
     _seqIn = _seqOut = 0;
+    _flowIn = _flowOut = 0;
     setState(() {
+      _analysed = false;
       _progress = 0;
       _error = null;
       _in = 0;
@@ -205,6 +220,8 @@ class _CountPageState extends State<CountPage> {
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
         },
+        flow: _flow,
+        animalShare: _share,
         onDecoderBusy: () async {
           await v.pause();
         },
@@ -215,6 +232,8 @@ class _CountPageState extends State<CountPage> {
             _events.add(CountEvent(
                 f.timeMs, c.$1, c.$2, c.$2 > 0 ? ++_seqIn : ++_seqOut, c.$3, c.$4));
           }
+          _flowIn = f.flowIn;
+          _flowOut = f.flowOut;
           setState(() {
             _in = f.nIn;
             _out = f.nOut;
@@ -225,6 +244,7 @@ class _CountPageState extends State<CountPage> {
         setState(() {
           _in = r.nIn;
           _out = r.nOut;
+          _analysed = true;
         });
       }
     } catch (e) {
@@ -233,6 +253,22 @@ class _CountPageState extends State<CountPage> {
       analyzer?.close();
       if (mounted) setState(() => _progress = null);
     }
+  }
+
+  /// The user knows how many animals really went in: derive the area one
+  /// animal covers from it and keep it for next time.
+  Future<void> _calibrate() async {
+    if (_flowIn <= 0) return;
+    final n = await askNumber(context, _in, title: 'Нақты неше мал кірді?');
+    if (n == null || n <= 0) return;
+    final share = _flowIn / n;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('flow_share', share);
+    setState(() {
+      _share = share;
+      _in = n;
+      _out = (_flowOut / share).round();
+    });
   }
 
   Future<void> _save() async {
@@ -320,6 +356,14 @@ class _CountPageState extends State<CountPage> {
                 value: _line.invert,
                 onChanged: (x) => setState(() => _line = _line.copyWith(invert: x)),
               ),
+              SwitchListTile(
+                dense: true,
+                title: const Text('Тығыз топ (ағын әдісі)'),
+                subtitle: const Text(
+                    'Қойлар бір-біріне тығыз тұрса. Санау шамамен болады.'),
+                value: _flow,
+                onChanged: _progress != null ? null : (x) => setState(() => _flow = x),
+              ),
               if (_progress != null)
                 LinearProgressIndicator(value: _progress)
               else
@@ -327,6 +371,12 @@ class _CountPageState extends State<CountPage> {
                   onPressed: _auto,
                   icon: const Icon(Icons.auto_awesome),
                   label: const Text('Автоматты санау'),
+                ),
+              if (_flow && _analysed && _progress == null)
+                TextButton.icon(
+                  onPressed: _calibrate,
+                  icon: const Icon(Icons.tune),
+                  label: const Text('Нақты санмен калибрлеу'),
                 ),
               if (_error != null)
                 Text(_error!, style: const TextStyle(color: Colors.red)),

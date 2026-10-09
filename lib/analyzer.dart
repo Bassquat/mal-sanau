@@ -9,6 +9,7 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
 import 'detect_math.dart';
+import 'flow_counter.dart';
 import 'gate_counter.dart';
 import 'gate_line.dart';
 
@@ -28,8 +29,13 @@ class CountEvent {
 }
 
 class FrameInfo {
-  const FrameInfo(this.timeMs, this.nIn, this.nOut, this.tracks, this.crossings);
+  const FrameInfo(this.timeMs, this.nIn, this.nOut, this.tracks, this.crossings,
+      [this.flowIn = 0, this.flowOut = 0]);
   final int timeMs, nIn, nOut;
+
+  /// Flow mode only: picture area moved in / out so far, as a multiple of the
+  /// frame area (used to calibrate the area one animal covers).
+  final double flowIn, flowOut;
   final List<TrackMark> tracks;
 
   /// (id, dir, x, y) of animals counted in this frame.
@@ -47,6 +53,8 @@ class FrameInfo {
         for (var i = 0; i + 3 < e.length; i += 4)
           (e[i].toInt(), e[i + 1].toInt(), e[i + 2], e[i + 3])
       ],
+      r.length > 5 ? r[4] as double : 0,
+      r.length > 5 ? r[5] as double : 0,
     );
   }
 }
@@ -83,10 +91,13 @@ class VideoAnalyzer {
     void Function(double progress)? onProgress,
     void Function(FrameInfo frame)? onFrame,
     Future<void> Function()? onDecoderBusy,
+    bool flow = false,
+    double animalShare = defaultAnimalShare,
   }) async {
     final rp = ReceivePort();
     final events = StreamIterator<dynamic>(rp);
-    final isolate = await Isolate.spawn(analysisWorker, WorkerInit(rp.sendPort, _model, line));
+    final isolate = await Isolate.spawn(analysisWorker, WorkerInit(rp.sendPort, _model, line,
+        flow: flow, animalShare: animalShare));
     try {
       await events.moveNext();
       final worker = events.current as SendPort;
@@ -153,7 +164,8 @@ class VideoAnalyzer {
 }
 
 class WorkerInit {
-  WorkerInit(this.reply, this.model, GateLine line)
+  WorkerInit(this.reply, this.model, GateLine line,
+      {this.flow = false, this.animalShare = defaultAnimalShare})
       : p1x = line.ordered.$1.dx,
         p1y = line.ordered.$1.dy,
         p2x = line.ordered.$2.dx,
@@ -161,7 +173,15 @@ class WorkerInit {
   final SendPort reply;
   final Uint8List model;
   final double p1x, p1y, p2x, p2y;
+
+  /// Dense-crowd mode: count by picture flow across the line, no detector.
+  final bool flow;
+  final double animalShare;
 }
+
+/// Share of the frame one sheep covers in the flow count. Fitted on one video
+/// of a packed flock; the app lets the user calibrate it with a known count.
+const double defaultAnimalShare = 0.048;
 
 void analysisWorker(WorkerInit init) {
   final port = ReceivePort();
@@ -170,21 +190,31 @@ void analysisWorker(WorkerInit init) {
   var ready = false;
   String? failure;
   try {
-    detector = _Detector(init.model);
+    if (!init.flow) detector = _Detector(init.model);
     ready = true;
   } catch (e) {
     failure = 'Модель ашылмады: $e';
   }
   CentroidTracker? tracker;
   GateCounter? gate;
+  FlowCounter? flowCounter;
+  var flowArea = 1.0;
   port.listen((msg) {
     if (!ready) {
       init.reply.send(failure);
       return;
     }
     if (msg == null) {
-      init.reply.send(<int>[gate?.nIn ?? 0, gate?.nOut ?? 0]);
-      detector.close();
+      if (init.flow) {
+        final fc = flowCounter;
+        init.reply.send(<int>[
+          fc == null ? 0 : fc.countIn(flowArea, init.animalShare),
+          fc == null ? 0 : fc.countOut(flowArea, init.animalShare),
+        ]);
+      } else {
+        init.reply.send(<int>[gate?.nIn ?? 0, gate?.nOut ?? 0]);
+        detector.close();
+      }
       port.close();
       return;
     }
@@ -192,6 +222,25 @@ void analysisWorker(WorkerInit init) {
       final image = msg is TransferableTypedData
           ? img.decodeJpg(msg.materialize().asUint8List())
           : yuvMessageToImage(msg as List);
+      if (image != null && init.flow) {
+        final w = image.width, h = image.height;
+        final fc = flowCounter ??= FlowCounter(
+            ax: init.p1x * w, ay: init.p1y * h, bx: init.p2x * w, by: init.p2y * h);
+        fc.update(w, h, (x, y) {
+          final p = image.getPixel(x, y);
+          return (p.r * 0.299 + p.g * 0.587 + p.b * 0.114).round();
+        });
+        flowArea = (w * h).toDouble();
+        init.reply.send(<Object>[
+          fc.countIn(flowArea, init.animalShare),
+          fc.countOut(flowArea, init.animalShare),
+          <double>[],
+          <double>[],
+          fc.areaIn / flowArea,
+          fc.areaOut / flowArea,
+        ]);
+        return;
+      }
       if (image != null) {
         final w = image.width.toDouble(), h = image.height.toDouble();
         gate ??= GateCounter(
