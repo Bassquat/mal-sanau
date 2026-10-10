@@ -156,6 +156,9 @@ class _CountPageState extends State<CountPage> {
   double _share = defaultAnimalShare;
   double _flowIn = 0, _flowOut = 0;
   bool _analysed = false;
+  // The phone could not decode for the player and the analysis at once: the
+  // player is paused and moved along with the analysed frames instead.
+  bool _followAnalysis = false;
 
   @override
   void initState() {
@@ -198,6 +201,7 @@ class _CountPageState extends State<CountPage> {
     _events.clear();
     _seqIn = _seqOut = 0;
     _flowIn = _flowOut = 0;
+    _followAnalysis = false;
     setState(() {
       _analysed = false;
       _progress = 0;
@@ -223,10 +227,12 @@ class _CountPageState extends State<CountPage> {
         flow: _flow,
         animalShare: _share,
         onDecoderBusy: () async {
+          _followAnalysis = true;
           await v.pause();
         },
         onFrame: (f) {
           if (!mounted) return;
+          if (_followAnalysis) v.seekTo(Duration(milliseconds: f.timeMs));
           _frames.add(f);
           for (final c in f.crossings) {
             _events.add(CountEvent(
