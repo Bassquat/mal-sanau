@@ -159,6 +159,7 @@ class _CountPageState extends State<CountPage> {
   // The phone could not decode for the player and the analysis at once: the
   // player is paused and moved along with the analysed frames instead.
   bool _followAnalysis = false;
+  String? _status;
 
   @override
   void initState() {
@@ -201,19 +202,21 @@ class _CountPageState extends State<CountPage> {
     _events.clear();
     _seqIn = _seqOut = 0;
     _flowIn = _flowOut = 0;
-    _followAnalysis = false;
     setState(() {
+      _status = null;
       _analysed = false;
       _progress = 0;
       _error = null;
       _in = 0;
       _out = 0;
     });
-    // The video plays (silently) while it is being analysed, so the marks on
-    // the animals follow the picture and the total is ready when it ends.
+    // The player and the frame extraction cannot share the video decoder on
+    // every phone, so the video is paused and moved along with the analysed
+    // frames: the picture scrubs through the video as the count grows.
     await v.setVolume(0);
+    await v.pause();
     await v.seekTo(Duration.zero);
-    await v.play();
+    _followAnalysis = true;
     VideoAnalyzer? analyzer;
     try {
       analyzer = await VideoAnalyzer.load();
@@ -251,6 +254,8 @@ class _CountPageState extends State<CountPage> {
           _in = r.nIn;
           _out = r.nOut;
           _analysed = true;
+          _status = 'Талдау аяқталды: ${r.frames} кадр, '
+              '${v.value.duration.inSeconds} секундтық бейне толық өтті.';
         });
       }
     } catch (e) {
@@ -384,6 +389,7 @@ class _CountPageState extends State<CountPage> {
                   icon: const Icon(Icons.tune),
                   label: const Text('Нақты санмен калибрлеу'),
                 ),
+              if (_status != null) Text(_status!, style: const TextStyle(color: Colors.grey)),
               if (_error != null)
                 Text(_error!, style: const TextStyle(color: Colors.red)),
               IconButton(
